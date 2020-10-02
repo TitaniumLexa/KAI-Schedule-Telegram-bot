@@ -68,7 +68,7 @@ namespace KAI_Schedule.Providers
             DayOfWeek week = cal.GetDayOfWeek(day);
             int weekNum = cal.GetWeekOfYear(day, CalendarWeekRule.FirstDay, DayOfWeek.Monday);
 
-            bool even = weekNum % 2 == 0 ? false : true;
+            bool even = (weekNum - 1) % 2 == 0;
 
             schedule += day.ToString("dd.MM") + "\n\n";
 
