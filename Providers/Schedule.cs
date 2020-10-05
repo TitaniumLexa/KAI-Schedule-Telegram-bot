@@ -70,7 +70,8 @@ namespace KAI_Schedule.Providers
 
             bool even = (weekNum - 1) % 2 == 0;
 
-            schedule += day.ToString("dd.MM") + "\n\n";
+            var dateString = day.ToString("dd.MM") + "\n\n";
+            schedule += dateString;
 
             switch (week)
             {
@@ -121,6 +122,8 @@ namespace KAI_Schedule.Providers
                 schedule += obj["prepodName"] + "\n\n";
             }
 
+            if (schedule == dateString)
+                schedule += "Выходной";
             return schedule;
 
         }
