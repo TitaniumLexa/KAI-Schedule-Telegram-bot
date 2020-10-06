@@ -172,7 +172,7 @@ namespace KAI_Schedule.Providers
                     if ((subscribeSetting.Time - time).Duration() <= delay.Divide(2))
                     {
                         string groupId = await _schedule.GetGroupID(GetGroup(subscribeSetting.Chat));
-                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Tomorrow);
+                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Today);
 
                         await _telegramBotClient.SendTextMessageAsync(subscribeSetting.Chat, scheduleMessage);
                     }
