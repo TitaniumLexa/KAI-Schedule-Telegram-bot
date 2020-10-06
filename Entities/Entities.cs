@@ -13,6 +13,11 @@ namespace KAI_Schedule.Entities
         Date
     }
 
+    public enum SubscribeType
+    {
+        Daily
+    }
+
     public class RequestURLs
     {
         public string GroupID { get; set; }
@@ -24,5 +29,12 @@ namespace KAI_Schedule.Entities
     {
         public Chat Chat { get; set; }
         public string Group { get; set; }
+    }
+
+    [JsonObject(MemberSerialization.Fields)]
+    public struct SubscribeSettings
+    {
+        public Chat Chat { get; set; }
+        public TimeSpan Time { get; set; }
     }
 }
