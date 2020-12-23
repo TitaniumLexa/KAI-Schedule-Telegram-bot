@@ -9,7 +9,16 @@ namespace KAI_Schedule
     {
         static async Task Main(string[] args)
         {
-            ConfigManager.Initialize();
+            try
+            {
+                ConfigManager.Initialize();
+            }
+            catch (ApplicationException e)
+            {
+                Console.WriteLine(e.Message);
+                return;
+            }
+            
 
             var telegram = new Providers.Telegram();
 

@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Text;
 using System.IO;
+using System.Net.Mime;
 using Newtonsoft.Json;
 
 namespace KAI_Schedule.Configuration
@@ -12,18 +14,16 @@ namespace KAI_Schedule.Configuration
 
         public static void Initialize()
         {
-            var json = String.Empty;
-
             if (File.Exists(Path))
             {
-                json = File.ReadAllText(Path, new UTF8Encoding(false));
+                var json = File.ReadAllText(Path, new UTF8Encoding(false));
                 Config = JsonConvert.DeserializeObject<Config>(json);
             }
             else
             {
-                Console.WriteLine("No configuration presented. Generating new default configuration file.");
-                json = JsonConvert.SerializeObject(new Config(), Formatting.Indented);
+                var json = JsonConvert.SerializeObject(new Config(), Formatting.Indented);
                 File.WriteAllText(Path, json, new UTF8Encoding(false));
+                throw new ApplicationException("No configuration presented. Generating new default configuration file.");
             }
         }
     }
