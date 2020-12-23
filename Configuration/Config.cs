@@ -4,11 +4,13 @@ namespace KAI_Schedule.Configuration
 {
     public class Config
     {
+        public string ConnectionString { get; set; }
         public string TelegramToken { get; set; }
         public RequestURLs RequestURLs { get; set; }
 
         public Config()
         {
+            ConnectionString = "ChangeIt";
             TelegramToken = "ChangeIt";
             RequestURLs = new RequestURLs
             {

@@ -1,14 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using KAI_Schedule.Configuration;
+using KAI_Schedule.Data;
 using KAI_Schedule.Entities;
-using Newtonsoft.Json;
+using KAI_Schedule.StateMachine;
+using Microsoft.EntityFrameworkCore;
 using Telegram.Bot;
 using Telegram.Bot.Args;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 
@@ -16,23 +17,13 @@ namespace KAI_Schedule.Providers
 {
     public class Telegram
     {
-        private TelegramBotClient _telegramBotClient;
-        private Schedule _schedule;
-
-        // TODO: Perhaps make сommon class
-        private List<ChatSettings> _chatSettings = new List<ChatSettings>();
-        private List<SubscribeSettings> _subscribeSettings = new List<SubscribeSettings>();
-
-        private string _chatSettingPath = "chatSettings.json";
-        private string _subscribeSettingPath = "subscribeSettings.json";
+        private readonly TelegramBotClient _telegramBotClient;
+        private readonly ScheduleProvider _scheduleProvider;
 
         public Telegram()
         {
             _telegramBotClient = new TelegramBotClient(ConfigManager.Config.TelegramToken);
-            _schedule = new Schedule();
-
-            ImportChatSettings();
-            ImportSubscribeSettings();
+            _scheduleProvider = new ScheduleProvider();
 
             _telegramBotClient.OnMessage += OnMessage;
             _telegramBotClient.OnCallbackQuery += OnCallbackQuery;
@@ -41,92 +32,37 @@ namespace KAI_Schedule.Providers
             CheckSubscribersAsync();
         }
 
-        // TODO: Rewrite repeating methods
-        private void ImportChatSettings()
+        public async Task SendTextMessageAsync(Chat chat, string message)
         {
-            if (System.IO.File.Exists(_chatSettingPath))
-            {
-                var json = System.IO.File.ReadAllText(_chatSettingPath, new UTF8Encoding(false));
-                if (json.Length != 0)
-                    _chatSettings = (List<ChatSettings>)JsonConvert.DeserializeObject(json, typeof(List<ChatSettings>));
-            }
+            await _telegramBotClient.SendTextMessageAsync(chat, message);
         }
 
-        // TODO: Rewrite repeating methods
-        private void ImportSubscribeSettings()
+        public async Task SendTextMessageAsync(Chat chat, string message, IReplyMarkup markup)
         {
-            if (System.IO.File.Exists(_subscribeSettingPath))
-            {
-                var json = System.IO.File.ReadAllText(_subscribeSettingPath, new UTF8Encoding(false));
-                if (json.Length != 0)
-                    _subscribeSettings = (List<SubscribeSettings>)JsonConvert.DeserializeObject(json, typeof(List<SubscribeSettings>));
-            }
-        }
-
-        // TODO: Write implementation
-        private T ImportSettings<T>(string path)
-        {
-            throw new NotImplementedException();
+            await _telegramBotClient.SendTextMessageAsync(chat, message, replyMarkup: markup);
         }
 
         private async void OnMessage(object sender, MessageEventArgs e)
         {
             if (e.Message.Text != null)
             {
-                Chat chat = e.Message.Chat;
-                string message = e.Message.Text;
+                var chat = e.Message.Chat;
+                var message = e.Message.Text;
 
-                Regex groupRegex = new Regex("[0-9]{4}");
+                await using var dbContext = new ApplicationDbContext();
 
-                //await _telegramBotClient.SendTextMessageAsync(chat, "Clear", replyMarkup: new ReplyKeyboardRemove());
+                var chatContext = dbContext.ChatContexts
+                    .Include(context => context.Subscriptions)
+                    .FirstOrDefault(context => context.ChatId == chat.Id);
 
-                if (message.Contains("/schedule"))
+                if (chatContext == null)
                 {
-                    string group = GetGroup(e.Message.Chat);
-                    if (group == null)
-                    {
-                        await _telegramBotClient.SendTextMessageAsync(chat, "Сначала нужно настроить ваши данные. Используйте /setup.");
-                        return;
-                    }
+                    chatContext = new ChatContext() { ChatId = chat.Id, CurrentState = new CommandState()};
+                    dbContext.ChatContexts.Add(chatContext);
+                }
 
-                    var keyboard = new InlineKeyboardMarkup(new InlineKeyboardButton[][]
-                        {
-                            new[]
-                            {
-                               InlineKeyboardButton.WithCallbackData("Сегодня", "Today"),
-                               InlineKeyboardButton.WithCallbackData("Завтра", "Tomorrow")
-                            },
-                            new[]
-                            {
-                               InlineKeyboardButton.WithCallbackData(DateTime.Now.AddDays(2).ToString("dd.MM"), "Date " + DateTime.Now.AddDays(2).ToString("dd.MM")),
-                               InlineKeyboardButton.WithCallbackData(DateTime.Now.AddDays(3).ToString("dd.MM"), "Date " + DateTime.Now.AddDays(3).ToString("dd.MM")),
-                               InlineKeyboardButton.WithCallbackData(DateTime.Now.AddDays(4).ToString("dd.MM"), "Date " + DateTime.Now.AddDays(4).ToString("dd.MM"))
-                            }
-
-                    });
-                    await _telegramBotClient.SendTextMessageAsync(chat, "Выберите день:", replyMarkup: keyboard);
-                }
-                else if (message.Contains("/subscribe"))
-                {
-                    await _telegramBotClient.SendTextMessageAsync(chat, "Введите время получения ежедневных уведомлений. \n Рекомендуемый формат времени 'xx:yy'");
-                }
-                else if (message.Contains("/setup"))
-                {
-                    await _telegramBotClient.SendTextMessageAsync(chat, "Введите номер группы.");
-                }
-                else if (groupRegex.Match(message).Success)
-                {
-                    string group = groupRegex.Match(message).Value;
-                    Console.WriteLine("Группа: " + group);
-                    SaveChatSettings(chat, group);
-                    await _telegramBotClient.SendTextMessageAsync(chat, "Хорошо. Теперь можно смотреть расписание.");
-                }
-                else if (TimeSpan.TryParse(message, out TimeSpan time))
-                {
-                    SaveSubscribeSettings(chat, time);
-                    await _telegramBotClient.SendTextMessageAsync(chat,
-                        $"Отлично. Теперь вы будете получать расписание в {time}.");
-                }
+                await chatContext.CurrentState.Handle(chatContext, message, this);
+                await dbContext.SaveChangesAsync();
             }
         }
 
@@ -135,89 +71,121 @@ namespace KAI_Schedule.Providers
             if (sender == null)
                 return;
 
-            string groupId = await _schedule.GetGroupID(GetGroup(e.CallbackQuery.Message.Chat));
+            try
+            {
+                await _telegramBotClient.AnswerCallbackQueryAsync(e.CallbackQuery.Id, "Секунду...");
+            }
+            catch (InvalidParameterException exception)
+            {
+                Console.WriteLine($"Шеф, все пропало: {exception.Message}");
+                return;
+            }
+
+            await using var dbContext = new ApplicationDbContext();
+
+            var chatContext = dbContext.ChatContexts.FirstOrDefault(context => context.ChatId == e.CallbackQuery.Message.Chat.Id);
+            string group = chatContext?.Group;
+
+            if (group == null)
+                return;
+            var scheduleEntry = dbContext.Schedules.FirstOrDefault(entry => entry.Group == group);
+
+            var schedule = scheduleEntry?.Schedule;
+            if (schedule == null)
+            {
+                string groupId = await _scheduleProvider.GetGroupId(group);
+                schedule = await _scheduleProvider.ParseScheduleByGroup(groupId);
+
+                if (schedule == null)
+                {
+                    await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, "Произошла ошибка при получении расписания, извините.");
+                    return;
+                }
+
+                var scheduleDbEntry = new ScheduleDbEntry()
+                {
+                    Group = group,
+                    LastUpdate = DateTime.Now,
+                    Schedule = schedule
+                };
+                dbContext.Schedules.Add(scheduleDbEntry);
+            }
+            
             if (e.CallbackQuery.Data == DayType.Today.ToString())
             {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Today);
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, schedule.OutputDay(DayType.Today));
             }
             else if (e.CallbackQuery.Data == DayType.Tomorrow.ToString())
             {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Tomorrow);
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, schedule.OutputDay(DayType.Tomorrow));
             }
             else if (e.CallbackQuery.Data.StartsWith(DayType.Date.ToString()))
             {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Date, e.CallbackQuery.Data.Remove(0, 5));
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, schedule.OutputDay(DayType.Date, e.CallbackQuery.Data.Remove(0, 5)));
             }
-            await _telegramBotClient.AnswerCallbackQueryAsync(e.CallbackQuery.Id);
+            
+            await dbContext.SaveChangesAsync();
         }
+
 
         private async Task CheckSubscribersAsync()
-        {
-            await Task.Run(CheckSubscribers);
-        }
-
-        // TODO: Add cancelation token
-        private async void CheckSubscribers()
         {
             TimeSpan delay = TimeSpan.FromMinutes(1);
             while (true)
             {
-                TimeSpan time = DateTime.Now - DateTime.Today;
-                Console.WriteLine($"Checking subscribers. Time is {DateTime.Now}");
-                foreach (var subscribeSetting in _subscribeSettings)
-                {
-                    if ((subscribeSetting.Time - time).Duration() <= delay.Divide(2))
-                    {
-                        string groupId = await _schedule.GetGroupID(GetGroup(subscribeSetting.Chat));
-                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Today);
+                await using var dbContext = new ApplicationDbContext();
 
-                        await _telegramBotClient.SendTextMessageAsync(subscribeSetting.Chat, scheduleMessage);
+                var currentTime = DateTime.Now;
+                var currentDay = DateTime.Today;
+
+                var stopwatch = Stopwatch.StartNew();
+
+                var subscriptions = dbContext.Subscriptions
+                    .Include(subscription => subscription.ChatContext);
+
+                stopwatch.Stop();
+                Console.WriteLine($"Checking subscribers. Time is {DateTime.Now}. Pending subscriptions count is {subscriptions.Count()}. Elapsed time {stopwatch.ElapsedMilliseconds} ms");
+
+                foreach (var subscription in subscriptions)
+                {
+                    if (subscription.LastNotificationTime + subscription.NotificationInterval > currentTime)
+                    {
+                        continue;
                     }
+
+                    var chatContext = subscription.ChatContext;
+                    var group = chatContext.Group;
+
+                    var scheduleEntry = dbContext.Schedules.FirstOrDefault(entry => entry.Group == group);
+                    
+                    var schedule = scheduleEntry?.Schedule;
+                    if (schedule == null)
+                    {
+                        string groupId = await _scheduleProvider.GetGroupId(group);
+                        schedule = await _scheduleProvider.ParseScheduleByGroup(groupId);
+
+                        if (schedule == null)
+                        {
+                            await _telegramBotClient.SendTextMessageAsync(chatContext.GetChat(), "Произошла ошибка при получении расписания, извините.");
+                            return;
+                        }
+
+                        var scheduleDbEntry = new ScheduleDbEntry()
+                        {
+                            Group = group,
+                            LastUpdate = DateTime.Now,
+                            Schedule = schedule
+                        };
+                        dbContext.Schedules.Add(scheduleDbEntry);
+                    }
+
+                    await _telegramBotClient.SendTextMessageAsync(chatContext.GetChat(), schedule.OutputDay(DayType.Today));
+                    subscription.LastNotificationTime = currentDay + subscription.NotificationTime;
                 }
+
+                await dbContext.SaveChangesAsync();
                 await Task.Delay(delay);
             }
-        }
-
-        // TODO: Add exist check
-        private void SaveChatSettings(Chat chat, string group)
-        {
-            _chatSettings.Add(new ChatSettings
-            {
-                Chat = chat,
-                Group = group
-            });
-
-            JsonWrite(_chatSettings, _chatSettingPath);
-        }
-
-        private void SaveSubscribeSettings(Chat chat, TimeSpan time)
-        {
-            _subscribeSettings.Add(new SubscribeSettings
-            {
-                Chat = chat,
-                Time = time
-            });
-
-            JsonWrite(_subscribeSettings, _subscribeSettingPath);
-        }
-
-        private string GetGroup(Chat chat)
-        {
-            ChatSettings us = _chatSettings.Find(x => x.Chat.Id == chat.Id);
-
-            //TODO: Think about simplification to 'return us.Group' instead of condition
-            if (us.Group != null)
-                return us.Group;
-            return null;
-        }
-
-        private void JsonWrite(object value, string path)
-        {
-            string json = JsonConvert.SerializeObject(value);
-            System.IO.File.WriteAllText(path, json, new UTF8Encoding(false));
         }
     }
 }

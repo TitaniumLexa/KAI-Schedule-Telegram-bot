@@ -1,7 +1,5 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using KAI_Schedule.Configuration;
-using KAI_Schedule.Providers;
 
 namespace KAI_Schedule
 {
