@@ -69,6 +69,8 @@ namespace KAI_Schedule.Providers
             int weekNum = cal.GetWeekOfYear(day, CalendarWeekRule.FirstDay, DayOfWeek.Monday);
 
             bool even = (weekNum - 1) % 2 == 0;
+            even = !even; // FUCK IT
+
 
             var dateString = day.ToString("dd.MM") + "\n\n";
             schedule += dateString;
