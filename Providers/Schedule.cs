@@ -69,7 +69,7 @@ namespace KAI_Schedule.Providers
             int weekNum = cal.GetWeekOfYear(day, CalendarWeekRule.FirstDay, DayOfWeek.Monday);
 
             bool even = (weekNum - 1) % 2 == 0;
-            even = !even; // FUCK IT
+            //even = !even; // Don't FUCK IT
 
 
             var dateString = day.ToString("dd.MM") + "\n\n";
@@ -86,6 +86,9 @@ namespace KAI_Schedule.Providers
                 default: return "Выходной";
 
             }
+
+            if (daySchedule == null)
+                return "Выходной";
 
             foreach (JObject obj in daySchedule)
             {

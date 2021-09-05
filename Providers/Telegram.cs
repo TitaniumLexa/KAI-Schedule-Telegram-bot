@@ -132,26 +132,36 @@ namespace KAI_Schedule.Providers
 
         private async void OnCallbackQuery(object sender, CallbackQueryEventArgs e)
         {
-            if (sender == null)
-                return;
+            if (sender != null)
+            {
+                await _telegramBotClient.AnswerCallbackQueryAsync(e.CallbackQuery.Id, "Поехали!");
+                try
+                {
+                    string groupId = await _schedule.GetGroupID(GetGroup(e.CallbackQuery.Message.Chat));
+                    if (e.CallbackQuery.Data == DayType.Today.ToString())
+                    {
+                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Today);
+                        await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                    }
+                    else if (e.CallbackQuery.Data == DayType.Tomorrow.ToString())
+                    {
+                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Tomorrow);
+                        await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                    }
+                    else if (e.CallbackQuery.Data.StartsWith(DayType.Date.ToString()))
+                    {
+                        string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Date,
+                            e.CallbackQuery.Data.Remove(0, 5));
+                        await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                    }
 
-            string groupId = await _schedule.GetGroupID(GetGroup(e.CallbackQuery.Message.Chat));
-            if (e.CallbackQuery.Data == DayType.Today.ToString())
-            {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Today);
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
+                    await _telegramBotClient.AnswerCallbackQueryAsync(e.CallbackQuery.Id);
+                }
+                catch (Exception value)
+                {
+                    Console.WriteLine(value);
+                }
             }
-            else if (e.CallbackQuery.Data == DayType.Tomorrow.ToString())
-            {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Tomorrow);
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
-            }
-            else if (e.CallbackQuery.Data.StartsWith(DayType.Date.ToString()))
-            {
-                string scheduleMessage = await _schedule.GetScheduleDay(groupId, DayType.Date, e.CallbackQuery.Data.Remove(0, 5));
-                await _telegramBotClient.SendTextMessageAsync(e.CallbackQuery.Message.Chat, scheduleMessage);
-            }
-            await _telegramBotClient.AnswerCallbackQueryAsync(e.CallbackQuery.Id);
         }
 
         private async Task CheckSubscribersAsync()
